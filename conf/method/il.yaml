@@ -1,0 +1,10 @@
+# @package _global_
+
+method:
+  type: il
+
+  eta: 0
+
+  alpha: 0.5
+  lambda_gp: 10
+  mix_coeff: 1
