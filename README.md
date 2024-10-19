@@ -1,6 +1,6 @@
 # OPT-AIL
 
-Official code for OPT-AIL: [Provably and Practically Efficient Adversarial Imitation Learning with General Function Approximation](https://openreview.net/forum?id=7YdafFbhxL).
+Official code of NeurIPS 2024 paper OPT-AIL: [Provably and Practically Efficient Adversarial Imitation Learning with General Function Approximation](https://openreview.net/forum?id=7YdafFbhxL).
 
 
 ## Usage
