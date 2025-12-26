@@ -5,12 +5,14 @@ import torch.nn.functional as F
 from torch.optim import Adam
 import hydra
 
-from utils.utils import soft_update, hard_update, get_concat_samples
-from agent.sac_models import DoubleQCritic
+from module.net import soft_update, hard_update
+from module.critic import DoubleQCritic
+from utils.utils import get_concat_samples
 
 
-class EAIL(object):
+class OPT_AIL(object):
     def __init__(self, obs_dim, action_dim, action_range, batch_size, args):
+        self.name = "opt_ail"
         self.gamma = args.gamma
         self.batch_size = batch_size
         self.action_range = action_range
@@ -69,24 +71,16 @@ class EAIL(object):
     def critic_target_net(self):
         return self.critic_target
 
+    @torch.no_grad()
+    def infer_r(self, state, action):
+        return self.discriminator(state, action)
+    
     def choose_action(self, state, sample=False):
         state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
         dist = self.actor(state)
         action = dist.sample() if sample else dist.mean
         # assert action.ndim == 2 and action.shape[0] == 1
         return action.detach().cpu().numpy()[0]
-
-    def getV(self, obs):
-        action, log_prob, _ = self.actor.sample(obs)
-        current_Q = self.critic(obs, action)
-        current_V = current_Q - self.alpha.detach() * log_prob
-        return current_V
-
-    def get_targetV(self, obs):
-        action, log_prob, _ = self.actor.sample(obs)
-        target_Q = self.critic_target(obs, action)
-        target_V = target_Q - self.alpha.detach() * log_prob
-        return target_V
 
     def update(self, policy_buffer, expert_buffer, logger, step):
         policy_batch = policy_buffer.get_samples(self.batch_size, self.device)
@@ -97,13 +91,13 @@ class EAIL(object):
         losses.update(self.update_optimistic(policy_batch, expert_batch))
 
         if self.actor and step % self.actor_update_frequency == 0:
-                obs = torch.cat([policy_batch[0], expert_batch[0]], dim=0)
+            obs = torch.cat([policy_batch[0], expert_batch[0]], dim=0)
 
-                if self.args.num_actor_updates:
-                    for i in range(self.args.num_actor_updates):
-                        actor_alpha_losses = self.update_actor_and_alpha(obs)
+            if self.args.num_actor_updates:
+                for i in range(self.args.num_actor_updates):
+                    actor_alpha_losses = self.update_actor_and_alpha(obs)
 
-                losses.update(actor_alpha_losses)
+            losses.update(actor_alpha_losses)
 
         if step % self.critic_target_update_frequency == 0:
             if self.args.train.soft_update:
@@ -142,7 +136,7 @@ class EAIL(object):
         return loss_dict
 
     def update_critic(self, policy_batch, expert_batch):
-        batch = get_concat_samples(policy_batch, expert_batch, self.args)
+        batch = get_concat_samples(policy_batch, expert_batch)
         obs, next_obs, action, reward, done = batch[:5]
         reward = self.infer_r(obs, action)
 
@@ -251,24 +245,6 @@ class EAIL(object):
             self.critic.load_state_dict(torch.load(critic_path, map_location=self.device))
         if disc_path is not None:
             self.discriminator.load_state_dict(torch.load(disc_path, map_location=self.device))
-    
-    @torch.no_grad()
-    def infer_r(self, state, action):
-        return self.discriminator(state, action)
-
-    def infer_q(self, state, action):
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        action = torch.FloatTensor(action).unsqueeze(0).to(self.device)
-
-        with torch.no_grad():
-            q = self.critic(state, action)
-        return q.squeeze(0).cpu().numpy()
-
-    def infer_v(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            v = self.getV(state).squeeze()
-        return v.cpu().numpy()
 
     def sample_actions(self, obs, num_actions):
         """For CQL style training."""

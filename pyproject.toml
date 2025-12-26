@@ -1,0 +1,30 @@
+[project]
+name = "opt-ail"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.10"
+dependencies = [
+    "dmc2gym",
+    "gym==0.17.1",
+    "hydra-core==1.0.0",
+    "stable-baselines3==1.0",
+    "tensorboard>=2.20.0",
+    "tensorboardx>=2.6.4",
+    "termcolor>=3.2.0",
+    "torch>=2.9.1",
+    "torchaudio>=2.9.1",
+    "torchvision>=0.24.1",
+    "wandb>=0.23.1",
+]
+
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+torchaudio = { index = "pytorch" }
+dmc2gym = { git = "https://github.com/Chr0nixz/dmc2gym.git" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

@@ -3,11 +3,13 @@ import json
 import os
 import csv
 import shutil
+import wandb
 import torch
 import torchvision
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from termcolor import colored
+
 
 COMMON_TRAIN_FORMAT = [
     ('episode', 'E', 'int'),
@@ -44,7 +46,7 @@ AGENT_TRAIN_FORMAT = {
     'bc': [
         ('actor_loss', 'ALOSS', 'float'),
     ],
-    'eail': [
+    'opt_ail': [
         ('actor_loss', 'ALOSS', 'float'),
         ('critic_loss', 'CLOSS', 'float'),
         ('discriminator_loss', 'DLOSS', 'float'),
@@ -54,12 +56,51 @@ AGENT_TRAIN_FORMAT = {
         ('actor_entropy', 'AENT', 'float'),
         ('gradient_penalty', 'GP', 'float')
     ],
-    'softq': [
-        # ('batch_reward', 'BR', 'float'),
+    'mb_ail': [
+        ('actor_loss', 'ALOSS', 'float'),
         ('critic_loss', 'CLOSS', 'float'),
-    ]
+        ('discriminator_loss', 'DLOSS', 'float'),
+        ('dynamics_loss', 'DYLOSS', 'float'),
+        ('dynamics_holdout_loss', 'HLOSS', 'float'),
+        ('alpha_loss', 'TLOSS', 'float'),
+        ('alpha_value', 'TVAL', 'float'),
+        ('actor_entropy', 'AENT', 'float'),
+        ('gradient_penalty', 'GP', 'float')
+    ],
+    'cmil': [
+        ('actor_loss', 'ALOSS', 'float'),
+        ('critic_loss', 'CLOSS', 'float'),
+        ('discriminator_loss', 'DLOSS', 'float'),
+        ('dynamics_loss', 'DYLOSS', 'float'),
+        ('dynamics_holdout_loss', 'HLOSS', 'float'),
+        ('alpha_loss', 'TLOSS', 'float'),
+        ('alpha_value', 'TVAL', 'float'),
+        ('actor_entropy', 'AENT', 'float'),
+        ('gradient_penalty', 'GP', 'float'),
+        ('unc_std', 'STD', 'float'),
+    ],
+    'mbpo': [
+        ('actor_loss', 'ALOSS', 'float'),
+        ('critic_loss', 'CLOSS', 'float'),
+        ('dynamics_loss', 'DYLOSS', 'float'),
+        ('dynamics_holdout_loss', 'HLOSS', 'float'),
+        ('alpha_loss', 'TLOSS', 'float'),
+        ('alpha_value', 'TVAL', 'float'),
+        ('actor_entropy', 'AENT', 'float'),
+        ('gradient_penalty', 'GP', 'float')
+    ],
+    'hyper': [
+        ('actor_loss', 'ALOSS', 'float'),
+        ('critic_loss', 'CLOSS', 'float'),
+        ('discriminator_loss', 'DLOSS', 'float'),
+        ('dynamics_loss', 'DYLOSS', 'float'),
+        ('dynamics_holdout_loss', 'HLOSS', 'float'),
+        ('alpha_loss', 'TLOSS', 'float'),
+        ('alpha_value', 'TVAL', 'float'),
+        ('actor_entropy', 'AENT', 'float'),
+        ('gradient_penalty', 'GP', 'float')
+    ],
 }
-
 
 class AverageMeter(object):
     def __init__(self):
@@ -132,13 +173,15 @@ class MetersGroup(object):
 
     def dump(self, step, prefix, save=True):
         if len(self._meters) == 0:
-            return
+            return None
+        data = None
         if save:
             data = self._prime_meters()
             data['step'] = step
             self._dump_to_csv(data)
             self._dump_to_console(data, prefix)
         self._meters.clear()
+        return data
 
 
 class Logger(object):
@@ -190,6 +233,22 @@ class Logger(object):
         if self._sw is not None:
             self._sw.add_histogram(key, histogram, step)
 
+    def _try_wandb_log_dict(self, data, step, prefix):
+        # Only log if wandb is installed and a run is active
+        if wandb is None or data is None or wandb.run is None:
+            return
+        log_data = {}
+        for key, value in data.items():
+            if key == 'step':
+                continue
+            log_data[f'{prefix}/{key}'] = value
+        if len(log_data) == 0:
+            return
+        try:
+            wandb.log(log_data, step=step)
+        except Exception as exc:
+            print(f"logger.py warning: wandb log failed ({exc})")
+
     def log(self, key, value, step, n=1, log_frequency=1):
         if not self._should_log(step, log_frequency):
             return
@@ -224,15 +283,18 @@ class Logger(object):
         self._try_sw_log_histogram(key, histogram, step)
 
     def dump(self, step, save=True, ty=None):
+        train_data = eval_data = None
         if ty is None:
-            self._train_mg.dump(step, 'train', save)
-            self._eval_mg.dump(step, 'eval', save)
+            train_data = self._train_mg.dump(step, 'train', save)
+            eval_data = self._eval_mg.dump(step, 'eval', save)
         elif ty == 'eval':
-            self._eval_mg.dump(step, 'eval', save)
+            eval_data = self._eval_mg.dump(step, 'eval', save)
         elif ty == 'train':
-            self._train_mg.dump(step, 'train', save)
+            train_data = self._train_mg.dump(step, 'train', save)
         else:
             raise f'invalid log type: {ty}'
+        self._try_wandb_log_dict(train_data, step, 'train')
+        self._try_wandb_log_dict(eval_data, step, 'eval')
 
 
 # def setup_logger(filepath):

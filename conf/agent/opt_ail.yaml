@@ -1,8 +1,7 @@
 # @package _global_
-
 agent:
-  name: dac
-  _target_: agent.dac.DAC
+  name: opt_ail
+  _target_: agent.opt_ail.OPT_AIL
   obs_dim: ??? # to be specified later
   action_dim: ??? # to be specified later
 
@@ -29,26 +28,27 @@ agent:
 
   # learn temperature coefficient (disabled by default)
   learn_temp: false
+  update_per_step: 1
 
   # Use either value_dice actor or normal SAC actor loss
   vdice_actor: false
 
 q_net:
-  _target_: agent.sac_models.SingleQCritic
+  _target_: module.critic.SingleQCritic
   obs_dim: ${agent.obs_dim}
   action_dim: ${agent.action_dim}
   hidden_dim: 256
   hidden_depth: 2
 
 disc_net:
-  _target_: agent.sac_models.Discriminator
+  _target_: module.discriminator.Discriminator
   obs_dim: ${agent.obs_dim}
   action_dim: ${agent.action_dim}
   hidden_dim: 256
   hidden_depth: 2
 
 diag_gaussian_actor:
-  _target_: agent.sac_models.DiagGaussianActor
+  _target_: module.actor.DiagGaussianActor
   obs_dim: ${agent.obs_dim}
   action_dim: ${agent.action_dim}
   hidden_dim: 256

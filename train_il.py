@@ -18,7 +18,7 @@ os.environ['MUJOCO_GL'] = 'osmesa'
 import hydra
 import numpy as np
 import torch
-import torch.nn.functional as F
+import wandb
 from omegaconf import DictConfig, OmegaConf
 from tensorboardX import SummaryWriter
 
@@ -58,18 +58,31 @@ def main(cfg: DictConfig):
     env = make_env(args)
     eval_env = make_env(args)
 
-    # Seed envs
-    env.seed(args.seed)
-    eval_env.seed(args.seed + 10)
-
     REPLAY_MEMORY = int(env_args.replay_mem)
     INITIAL_MEMORY = int(env_args.initial_mem)
     EPISODE_STEPS = int(env_args.eps_steps)
     EPISODE_WINDOW = int(env_args.eps_window)
     LEARN_STEPS = int(env_args.learn_steps)
-    INITIAL_STATES = 128  # Num initial states to use to calculate value of initial state distribution s_0
 
     agent = make_agent(env, args)
+
+
+    if args.agent.name == 'cmil':
+        wandb.init(
+            entity='chr0nix',
+            project='cmil',
+            name=f'{args.agent.name}_{args.env.name}_{args.seed}',
+            config=OmegaConf.to_container(args, resolve=True),
+        )
+    else:
+        wandb.init(
+            entity='chr0nix',
+            project='OPT_AIL',
+            name=f'{args.agent.name}_{args.env.name}_{args.seed}',
+            config=OmegaConf.to_container(args, resolve=True),
+        )
+
+
 
     if args.pretrain:
         pretrain_path = hydra.utils.to_absolute_path(args.pretrain)
@@ -88,10 +101,39 @@ def main(cfg: DictConfig):
     print(f'--> Expert memory size: {expert_memory_replay.size()}')
 
     online_memory_replay = Memory(REPLAY_MEMORY//2, args.seed+1)
+    if args.agent.name == "mb_ail" or args.agent.name == "mbpo" or args.agent.name == "hyper" or args.agent.name == 'cmil':
+        generate_memory_replay = Memory(args.agent.generate_batch_size * args.agent.rollout_min_length * args.agent.model_retain_epochs, args.seed+1)
+    else:
+        generate_memory_replay = None
 
     # Setup logging
     ts_str = datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = os.path.join(args.log_dir, args.env.name, str(args.seed))
+    
+    # 设置 replay buffer 保存路径
+    buffer_folder = getattr(args, 'buffer_folder', 'buffers/')
+    buffer_dir = os.path.join(buffer_folder, args.env.name, str(args.seed))
+    
+    # 加载保存的 replay buffer（如果存在）
+    if hasattr(args, 'load_replay_buffer') and args.load_replay_buffer:
+        buffer_path = os.path.join(buffer_dir, 'online_memory_replay.pkl')
+        if os.path.exists(buffer_path):
+            print(f'--> Loading online replay buffer from {buffer_path}')
+            try:
+                online_memory_replay.load_replay_buffer(buffer_path)
+                print(f'--> Loaded {online_memory_replay.size()} samples from online replay buffer')
+            except Exception as e:
+                print(f'--> Failed to load online replay buffer: {e}')
+        
+        if generate_memory_replay is not None:
+            buffer_path = os.path.join(buffer_dir, 'generate_memory_replay.pkl')
+            if os.path.exists(buffer_path):
+                print(f'--> Loading generate replay buffer from {buffer_path}')
+                try:
+                    generate_memory_replay.load_replay_buffer(buffer_path)
+                    print(f'--> Loaded {generate_memory_replay.size()} samples from generate replay buffer')
+                except Exception as e:
+                    print(f'--> Failed to load generate replay buffer: {e}')
     writer = SummaryWriter(log_dir=log_dir)
     print(f'--> Saving logs at: {log_dir}')
     logger = Logger(log_dir,
@@ -103,19 +145,12 @@ def main(cfg: DictConfig):
     steps = 0
 
     # track mean reward and scores
-    scores_window = deque(maxlen=EPISODE_WINDOW)  # last N scores
     rewards_window = deque(maxlen=EPISODE_WINDOW)  # last N rewards
     best_eval_returns = -np.inf
 
     learn_steps = 0
     begin_learn = False
     episode_reward = 0
-
-    # Sample initial states from env
-    state_0 = [env.reset()] * INITIAL_STATES
-    if isinstance(state_0[0], LazyFrames):
-        state_0 = np.array(state_0) / 255.0
-    state_0 = torch.FloatTensor(np.array(state_0)).to(args.device)
 
     for epoch in count():
         state = env.reset()
@@ -126,7 +161,6 @@ def main(cfg: DictConfig):
         for episode_step in range(EPISODE_STEPS):
 
             if steps < args.num_seed_steps:
-                # Seed replay buffer with random actions
                 action = env.action_space.sample()
             else:
                 with eval_mode(agent):
@@ -135,13 +169,13 @@ def main(cfg: DictConfig):
             episode_reward += reward
             steps += 1
 
-            if learn_steps % args.env.eval_interval == 0:
+            # evaluate
+            if steps % args.env.eval_interval == 0:
                 eval_returns, eval_timesteps = evaluate(agent, eval_env, num_episodes=args.eval.eps)
                 returns = np.mean(eval_returns)
-                learn_steps += 1  # To prevent repeated eval at timestep 0
-                logger.log('eval/episode_reward', returns, learn_steps)
-                logger.log('eval/episode', epoch, learn_steps)
-                logger.dump(learn_steps, ty='eval')
+                logger.log('eval/episode_reward', returns, steps)
+                logger.log('eval/episode', epoch, steps)
+                logger.dump(steps, ty='eval')
                 # print('EVAL\tEp {}\tAverage reward: {:.2f}\t'.format(epoch, returns))
 
                 if returns > best_eval_returns:
@@ -155,38 +189,48 @@ def main(cfg: DictConfig):
                 done_no_lim = 0
             online_memory_replay.add((state, next_state, action, reward, done_no_lim))
 
+            # Start learning
             if online_memory_replay.size() > INITIAL_MEMORY:
-                # Start learning
                 if begin_learn is False:
                     print('Learn begins!')
                     begin_learn = True
 
-                learn_steps += 1
                 if learn_steps == LEARN_STEPS:
                     print('Finished!')
+                    # final_save(agent, args.env.name)
+                    # 保存最终的 replay buffer
+                    if hasattr(args, 'save_replay_buffer') and args.save_replay_buffer:
+                        buffer_folder = getattr(args, 'buffer_folder', 'buffers/')
+                        buffer_dir = os.path.join(buffer_folder, args.env.name, str(args.seed))
+                        os.makedirs(buffer_dir, exist_ok=True)
+                        if online_memory_replay is not None and online_memory_replay.size() > 0:
+                            online_memory_replay.save(os.path.join(buffer_dir, args.env.name + '_replay.pkl'))
+                        # if generate_memory_replay is not None and generate_memory_replay.size() > 0:
+                        #     generate_memory_replay.save(os.path.join(buffer_dir, 'generate_memory_replay.pkl'))
                     return
+                
+                # update agent
+                if args.agent.name == "mb_ail" or args.agent.name == "mbpo" or args.agent.name == "hyper" or args.agent.name == "cmil":
+                    for _ in range(args.agent.update_per_step):
+                        agent.update(online_memory_replay, generate_memory_replay, expert_memory_replay, logger, learn_steps, epoch)
+                else:
+                    for _ in range(args.agent.update_per_step):
+                        agent.update(online_memory_replay, expert_memory_replay, logger, learn_steps)
+                learn_steps += 1
 
-                ######
-                # IQ-Learn Modification
-                losses = agent.update(online_memory_replay, expert_memory_replay, logger, learn_steps)
-                ######
-
-                if learn_steps % args.log_interval == 0:
-                    for key, loss in losses.items():
-                        writer.add_scalar(key, loss, global_step=learn_steps)
+                if learn_steps % 20000 == 0:
+                    save_model_by_step(agent, learn_steps, args)
 
             if done:
                 break
             state = next_state
 
         rewards_window.append(episode_reward)
-        logger.log('train/episode', epoch, learn_steps)
-        logger.log('train/episode_reward', episode_reward, learn_steps)
-        logger.log('train/duration', time.time() - start_time, learn_steps)
-        logger.dump(learn_steps, save=begin_learn)
-        # print('TRAIN\tEp {}\tAverage reward: {:.2f}\t'.format(epoch, np.mean(rewards_window)))
-        save(agent, epoch, args, output_dir='results')
-
+        logger.log('train/episode', epoch, steps)
+        logger.log('train/episode_reward', episode_reward, steps)
+        logger.log('train/duration', time.time() - start_time, steps)
+        logger.dump(steps, save=begin_learn)
+        # save(agent, epoch, args, output_dir='results')
 
 def save(agent, epoch, args, output_dir='results'):
     if epoch % args.save_interval == 0:
@@ -198,6 +242,51 @@ def save(agent, epoch, args, output_dir='results'):
         if not os.path.exists(output_dir):
             os.mkdir(output_dir)
         agent.save(f'{output_dir}/{args.agent.name}_{name}')
+
+def save_model_by_step(agent, step, args):
+    if not hasattr(args, 'model_folder') or args.model_folder is None:
+        return
+    
+    model_folder = args.model_folder
+    agent_name = args.agent.name
+    env_name = args.env.name
+    seed = args.seed
+    
+    # 创建 model/{env} 目录
+    env_dir = os.path.join(model_folder, env_name)
+    os.makedirs(env_dir, exist_ok=True)
+    
+    # 根据 agent 类型保存相应的组件
+    # 文件名格式: {agent}_{component}_{step}_{seed}
+    base_name = f"{agent_name}"
+    
+    # 保存 actor
+    if hasattr(agent, 'actor'):
+        actor_path = os.path.join(env_dir, f"{base_name}_actor_{step}_{seed}")
+        torch.save(agent.actor.state_dict(), actor_path)
+        print(f'Saved actor to {actor_path}')
+    
+    # 保存 critic
+    if hasattr(agent, 'critic'):
+        critic_path = os.path.join(env_dir, f"{base_name}_critic_{step}_{seed}")
+        torch.save(agent.critic.state_dict(), critic_path)
+        print(f'Saved critic to {critic_path}')
+    
+    # 保存 dynamics（如果存在）
+    if hasattr(agent, 'dynamics'):
+        dynamics_path = os.path.join(env_dir, f"{base_name}_dynamics_{step}_{seed}")
+        torch.save(agent.dynamics.state_dict(), dynamics_path)
+        print(f'Saved dynamics to {dynamics_path}')
+    
+    # 保存 discriminator（如果存在）
+    if hasattr(agent, 'discriminator'):
+        disc_path = os.path.join(env_dir, f"{base_name}_discriminator_{step}_{seed}")
+        torch.save(agent.discriminator.state_dict(), disc_path)
+        print(f'Saved discriminator to {disc_path}')
+
+def final_save(agent, env):
+    path = f'/home/ubuntu/zhangzhilong/mb_ail/pretrain/{env}'
+    agent.save(path)
 
 
 if __name__ == "__main__":

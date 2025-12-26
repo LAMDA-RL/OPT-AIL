@@ -2,7 +2,7 @@
 
 env:
   name: dmc_walker_run
-  demo: walker_run_10.pkl
+  demo: walker_run_100.pkl
   # learn_steps: 1e5
   # eval_interval: 1e3
 
@@ -34,7 +34,7 @@ train:
   batch: 256
 
 q_net:
-  _target_: agent.sac_models.SingleQCritic
+  _target_: module.critic.SingleQCritic
 
 disc_net:
-  _target_: agent.sac_models.Discriminator
+  _target_: module.discriminator.Discriminator

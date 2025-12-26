@@ -1,21 +1,43 @@
 # OPT-AIL
 
-Official code of NeurIPS 2024 paper OPT-AIL: [Provably and Practically Efficient Adversarial Imitation Learning with General Function Approximation](https://openreview.net/forum?id=7YdafFbhxL).
+Official code for OPT-AIL: [Provably and Practically Efficient Adversarial Imitation Learning with General Function Approximation](https://openreview.net/forum?id=7YdafFbhxL).
+
+## Quickstart
+
+### Prerequisites
+- Python version compatible with this project (see `requires-python` in `pyproject.toml`)
+- `uv` installed
+
+### Install uv
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Clone and install dependencies
+```bash
+git clone https://github.com/LAMDA-RL/OPT-AIL.git
+cd OPT-AIL
+
+uv sync
+```
 
 
 ## Usage
-
-First, you need to install Python packages listed in `requirements.txt` using `pip install -r requirements.txt`.
-
 The expert trajectories used during the experiments can be found here:
-https://drive.google.com/drive/folders/1GiwgfrnFAjZ1JGaw3T-KeViGdOFbkRqr?usp=drive_link
+https://drive.google.com/file/d/1ZBZPjQITGLkiKusdGAwObLdomTTU3bqs/view?usp=drive_link
+
+Set `buffer_folder` and `model_folder` in `conf/config.yaml` using absolute path.
 
 Then, just run the scripts in the `scripts` dir. You can try as follows:
 
-For dmc tasks:
-
+Run model-free opt-ail:
 ```bash
-sh scripts/run_dmc.sh
+sh scripts/run_mf.sh
+```
+
+Run model-based opt-ail:
+```bash
+sh scripts/run_mb.sh
 ```
 
 
