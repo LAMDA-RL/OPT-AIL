@@ -1,1 +1,0 @@
-CUDA_VISIBLE_DEVICES=0 python train_il.py env=finger_spin agent=eail expert.demos=1 method=il method.eta=0.001 method.lambda_gp=10 agent.actor_lr=3e-05 agent.init_temp=0.01 seed=0

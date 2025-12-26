@@ -2,7 +2,7 @@
 
 env:
   name: dmc_hopper_hop
-  demo: hopper_hop_10.pkl
+  demo: hopper_hop_100.pkl
   # learn_steps: 1e5
   # eval_interval: 1e3
 
@@ -34,4 +34,4 @@ train:
   batch: 256
 
 q_net:
-  _target_: agent.sac_models.SingleQCritic
+  _target_: module.critic.SingleQCritic

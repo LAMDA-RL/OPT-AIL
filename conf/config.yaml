@@ -30,7 +30,7 @@ eval:
 
 env:
   replay_mem: 1000000
-  initial_mem: 1280
+  initial_mem: 2000
   eps_steps: 1000
   eps_window: 100
   learn_steps: 5e5
@@ -49,6 +49,12 @@ save_interval: 5 # Save networks every this many epochs
 hydra_base_dir: ""
 eval_only: False
 
+# Replay buffer save/load
+save_replay_buffer: False  # Whether to save replay buffer when saving models
+load_replay_buffer: False  # Whether to load saved replay buffer at start
+buffer_folder: ???
+model_folder: ???
+
 # Do offline learning
 offline: False
 # Number of actor updates per env step
@@ -56,5 +62,5 @@ num_actor_updates: 1
 
 defaults:
   - method: il
-  - agent: dac
+  - agent: mb_ail
   - env: finger_spin
